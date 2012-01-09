@@ -139,7 +139,7 @@ class StratumClient {
         $this->_session_timeout_at = time() + intval($headers['x-session-timeout']);
 
         # Store cookie and parse session ID
-        if ($headers['set-cookie'])
+        if (isset($headers['set-cookie']))
         {
             $this->_cookie = $headers['set-cookie'];
             $cookies = $this->_parseCookie($this->_cookie);
@@ -212,7 +212,7 @@ class StratumClient {
                 continue;
             }
 
-            if($obj['method'])
+            if(isset($obj['method']))
             {
                 # It's the request or notification
 
@@ -262,10 +262,10 @@ class StratumClient {
         $header_data = array();
         foreach($headers as $value){
             $header = explode(": ",$value);
-            if($header[0] && !$header[1]) {
+            if(isset($header[0]) && !isset($header[1])) {
                 $header_data['http_code'] = $header[0];
             }
-            elseif($header[0] && $header[1]){
+            elseif(isset($header[0]) && isset($header[1])){
                 $header_data[strtolower($header[0])] = $header[1];
             }
         }
