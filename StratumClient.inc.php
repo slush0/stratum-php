@@ -17,12 +17,27 @@
 
 class ResultObject
 {
-    protected $_result;
-    protected $_err_code;
-    protected $_err_msg;
+    protected $_request_id = null;
+    protected $_finished = false;
 
-    public function __construct($result, $err_code, $err_msg)
+    protected $_result = null;
+    protected $_err_code = null;
+    protected $_err_msg = null;
+
+    public function __construct($request_id)
     {
+        $this->_request_id = $request_id;
+        $this->_finished = false;
+    }
+
+    public function set_result($result, $err_code, $err_msg)
+    {
+        if($this->_finished)
+        {
+            throw new Exception("Result for the request request ID {$this->_request_id} is already known.");
+        }
+
+        $this->_finished = true;
         $this->_result = $result;
         $this->_err_code = $err_code;
         $this->_err_msg = $err_msg;
@@ -30,6 +45,12 @@ class ResultObject
 
     public function get()
     {
+        if(!$this->_finished)
+        {
+            # TODO: Implement custom exception enable catching this state.
+            throw new Exception("Result for request ID {$this->_request_id} is not received yet.");
+        }
+
         if($this->_err_code || $this->_err_msg)
         {
             # FIXME: Implement passing parameters to the exception
@@ -86,11 +107,13 @@ class StratumClient {
 
     }
 
-    public function add_request($method, $args, &$callback) {
+    public function add_request($method, $args) {
         $this->_request_id++;
         $this->_buffer[] = $this->_buildRequest($method, $args, $this->_request_id);
-        $this->_lookup_table[$this->_request_id] = &$callback;
-        return $this->_request_id;
+
+        $result = new ResultObject($this->_request_id);
+        $this->_lookup_table[$this->_request_id] = $result;
+        return $result;
     }
 
     public function communicate()
@@ -179,10 +202,16 @@ class StratumClient {
 
     protected function _processResponse($payload) {
         # Read line by line
-        $lines = explode("\n", $payload);
+        $lines = explode("\n", trim($payload));
         foreach($lines as $line)
         {
             $obj = json_decode($line, true);
+            if($obj === null)
+            {
+                # Cannot decode line
+                continue;
+            }
+
             if($obj['method'])
             {
                 # It's the request or notification
@@ -199,7 +228,13 @@ class StratumClient {
                     $err_msg = null;
                 }
 
-                $this->_lookup_table[$obj['id']] = new ResultObject($obj['result'], $err_code, $err_msg);
+                $result_object = $this->_lookup_table[$obj['id']];
+                if($result_object)
+                {
+                    $result_object->set_result($obj['result'], $err_code, $err_msg);
+                } else {
+                    echo "Received unexpected response: {$obj['id']}, {$obj['result']}, $err_code, $err_msg";
+                }
             }
         }
     }
