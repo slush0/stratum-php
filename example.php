@@ -21,27 +21,23 @@
     $c->register_service('blockchain.block', new BlockchainBlockService());
 
     # Subscribe for receiving block broadcasts
-    $result = null;
-    $c->add_request('blockchain.block.subscribe', array(), $result);
+    $c->add_request('blockchain.block.subscribe', array());
 
     # Perform some standard RPC calls
-    $result = null;
-    $result2 = null;
-    $c->add_request('node.ping', array('ahoj'), $result);
-    $c->add_request('firstbits.resolve', array('1marek'), $result2);
+    $result = $c->add_request('node.ping', array('ahoj'));
+    $result2 = $c->add_request('firstbits.resolve', array('1marek'));
     $c->communicate();
 
     var_dump($result->get());
     var_dump($result2->get());
 
     # Another call using the same session, but remote service doesn't exist
-    $result = null;
-    $c->add_request('service_which_does_not_exist.ping', array('cus'), $result);
+    $result = $c->add_request('service_which_does_not_exist.ping', array('cus'));
     $c->communicate();
 
     try {
         var_dump($result->get());
     } catch(Exception $e) {
-        echo "RPC call failed";
+        echo "RPC call failed (as expected, because we're calling non-existing service)";
     }
 
