@@ -6,38 +6,45 @@
     # Extended functionality for exposing RPC services on this client
     require_once('StratumService.inc.php');
 
-    class BlockchainBlockService extends StratumService
+    class TimestampReceivingService extends StratumService
     {
-        # This method can be called *from* the server as 'blockchain.block.new'
-        function rpc_new($params)
+        # This method can be called *from* the server as 'example.pubsub.time_event'
+        function time_event($params)
         {
-            echo "New block received";
+            echo "New timestamp received: $params";
         }
     }
-
-    $c = new StratumClient('stratum.bitcoin.cz', 8001);
+    
+    #$c = new StratumClient('california.stratum.bitcoin.cz', 8000);
+    $c = new StratumClient('localhost', 8000);
    
     # Expose service for receiving broadcasts about new blocks 
-    $c->register_service('blockchain.block', new BlockchainBlockService());
+    $c->register_service('example.pubsub		', new TimestampReceivingService());
 
-    # Subscribe for receiving block broadcasts
-    $c->add_request('blockchain.block.subscribe', array());
+    # Subscribe for receiving unix timestamps from stratum server
+    $c->add_request('example.pubsub.subscribe', array(2));
 
     # Perform some standard RPC calls
-    $result = $c->add_request('node.ping', array('ahoj'));
-    $result2 = $c->add_request('firstbits.resolve', array('1marek'));
+    $result = $c->add_request('example.hello_world', array());
+    $result2 = $c->add_request('example.ping', array('ahoj'));
     $c->communicate();
 
     var_dump($result->get());
     var_dump($result2->get());
 
-    # Another call using the same session, but remote service doesn't exist
-    $result = $c->add_request('service_which_does_not_exist.ping', array('cus'));
+    # Another call using the same session, but remote service will throw an exception
+    $result = $c->add_request('example.throw_exception', array());
     $c->communicate();
 
     try {
         var_dump($result->get());
     } catch(Exception $e) {
-        echo "RPC call failed (as expected, because we're calling non-existing service)";
+        echo "RPC call failed, which is expected\n";
     }
 
+    # Test of receiving notifications in HTTP Polling mode
+    for($x=0;$x<10;$x++) {
+        echo "Polling...\n";
+        $c->communicate();
+        sleep(10);
+    }
