@@ -118,10 +118,6 @@ class StratumClient {
 
     public function communicate()
     {
-        if (!$this->_buffer) {
-            return;
-        }
-
         $payload = implode('', $this->_buffer);
         $response = $this->_sendRequest($payload, $this->_cookie);
         $this->_buffer = array();
