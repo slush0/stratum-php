@@ -66,13 +66,13 @@ class StratumClient {
     protected $_host;
     protected $_port;
     protected $_timeout;
+    protected $_push_url;
 
     protected $_sock;
     protected $_cookie;
     protected $_session_id;
     protected $_session_timeout_at;
 
-    protected $_request_id;
     protected $_buffer;
     protected $_lookup_table;
 
@@ -82,13 +82,11 @@ class StratumClient {
         $this->_host = $host;
         $this->_port = $port;
         $this->_timeout = $timeout;
+        $this->_push_url = null;
 
         $this->_sock = null;
-        $this->_cookie = null;
-        $this->_session_id = null;
-        $this->_session_timeout_at = time()-1;
+        $this->_clean_session();
 
-        $this->_request_id = 0;
         $this->_buffer = array();
         $this->_lookup_table = array();
 
@@ -99,6 +97,25 @@ class StratumClient {
         $this->_close();
     }
 
+    public function set_push_url($url)
+    {
+        $this->_push_url = $url;
+    }
+
+    protected function _clean_session() {
+        $this->_session_id = null;
+        $this->_session_timeout_at = time()-1;
+        $this->_cookie = null;
+    }
+
+    protected function _set_session($cookie) {
+        $this->_cookie = $cookie;
+        $cookies = $this->_parse_cookie($cookie);
+        if ($cookies['STRATUM_SESSION']) {
+            $this->_session_id = $cookies['STRATUM_SESSION'];
+        }
+    }
+ 
     protected function _close() {
         if ($this->_sock) {
             curl_close($this->_sock);
@@ -108,12 +125,12 @@ class StratumClient {
 
     public function serialize()
     {
-        return serialize(array($this->_session_id, $this->_session_timeout_at, $this->_cookie, $this->_request_id, $this->_lookup_table));
+        return serialize(array($this->_session_id, $this->_session_timeout_at, $this->_cookie, $this->_lookup_table));
     }
 
     public function unserialize($data)
     {
-        list($this->_session_id, $this->_session_timeout_at, $this->_cookie, $this->_request_id, $this->_lookup_table) = unserialize($data);
+        list($this->_session_id, $this->_session_timeout_at, $this->_cookie, $this->_lookup_table) = unserialize($data);
     }
 
     protected function _parse_method($method)
@@ -132,18 +149,18 @@ class StratumClient {
     {
         list($service_type, $m) = $this->_parse_method($method);
 
-        if(!isset($this->_services[$service_type])
+        if(!isset($this->_services[$service_type]))
             throw new Exception("Local service '$service_type' not found.");
 
-        return call_user_func(array($this->_service[$service_type], "rpc_$m"), $params);
+        return call_user_func(array($this->_services[$service_type], $m), $params);
     }
 
     public function add_request($method, $args) {
-        $this->_request_id++;
-        $this->_buffer[] = $this->_build_request($this->_request_id, $method, $args);
+        $request_id = uniqid(mt_rand().'-');
+        $this->_buffer[] = $this->_build_request($request_id, $method, $args);
 
-        $result = new ResultObject($this->_request_id);
-        $this->_lookup_table[$this->_request_id] = $result;
+        $result = new ResultObject($request_id);
+        $this->_lookup_table[$request_id] = $result;
         return $result;
     }
 
@@ -158,7 +175,11 @@ class StratumClient {
     public function communicate()
     {
         $payload = implode('', $this->_buffer);
-        $response = $this->_send_request($payload, $this->_cookie);
+
+        if($this->_session_id && time() >= $this->_session_timeout_at)
+            $this->_clean_session();
+
+        $response = $this->_send_request($payload);
         $this->_buffer = array();
 
         # This strip HTTP header from the response and return
@@ -176,12 +197,8 @@ class StratumClient {
         # Store cookie and parse session ID
         if (isset($headers['set-cookie']))
         {
-            $this->_cookie = $headers['set-cookie'];
-            $cookies = $this->_parse_cookie($this->_cookie);
-            if ($cookies['STRATUM_SESSION']) {
-                $this->_session_id = $cookies['STRATUM_SESSION'];
-            }
-        }
+            $this->_set_session($headers['set-cookie']);
+       }
 
         $this->_process_response($response);
     }
@@ -202,8 +219,8 @@ class StratumClient {
             $response = array(
                 'id' => $request_id,
                 'result' => null,
-                'error' => array((int)$err_code, (string)$err_msg);
-            }
+                'error' => array((int)$err_code, (string)$err_msg, ''),
+            );
         } else {
             $response = array(
                 'id' => $request_id,
@@ -214,7 +231,7 @@ class StratumClient {
         return json_encode($response)."\n";
     }
 
-    protected function _send_request($payload, $cookie=null) {
+    protected function _send_request($payload) {
         if (!$this->_sock) {
             $this->_sock = curl_init();
         }
@@ -232,12 +249,17 @@ class StratumClient {
         curl_setopt($sock, CURLOPT_POST, 1); 
         curl_setopt($sock, CURLOPT_RETURNTRANSFER, 1); 
         curl_setopt($sock, CURLOPT_POSTFIELDS, $payload);
-        curl_setopt($sock, CURLOPT_HTTPHEADER, array("Content-Type: application/stratum",
-                                                     "Connection: Keep-alive",
-                                                     "User-Agent: stratum-php/0.1",
-                                                     "Content-Length: ".strlen($payload))); 
-        if ($cookie) {
-            curl_setopt($sock, CURLOPT_COOKIE, $cookie);
+        
+        $headers = array("Content-Type: application/stratum",
+                         "Connection: Keep-alive",
+                         "User-Agent: stratum-php/0.1",
+                         "Content-Length: ".strlen($payload)); 
+        if($this->_push_url) $headers[] = "X-Callback-Url: {$this->_push_url}";
+
+        curl_setopt($sock, CURLOPT_HTTPHEADER, $headers);
+
+        if ($this->_cookie) {
+            curl_setopt($sock, CURLOPT_COOKIE, $this->_cookie);
         }
 
         $response = curl_exec($sock); 
@@ -256,7 +278,12 @@ class StratumClient {
 
     protected function _process_response($payload) {
         # Read line by line
-        $lines = explode("\n", trim($payload));
+        $payload = trim($payload);
+        if(!$payload)
+            # It's just an empty response of polling
+            return;
+
+        $lines = explode("\n", $payload);
         foreach($lines as $line)
         {
             $obj = json_decode($line, true);
@@ -272,7 +299,7 @@ class StratumClient {
                 # It's the request or notification
 
                 # TODO: Add exception handling
-                $resp = $this->_call_local_service($obj['method'], $obj['params']);
+                $resp = $this->_process_local_service($obj['method'], $obj['params']);
 
                 if($obj['id'] !== null)
                 {
