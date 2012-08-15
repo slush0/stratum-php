@@ -8,16 +8,21 @@
 
     class TimestampReceivingService extends StratumService
     {
-        # This method can be called *from* the server as 'example.pubsub.time_event'
+        # This catch the notification of the 'example.pubsub.time_event'
         function time_event($params)
         {
-            echo "New timestamp received: $params";
+            echo "New timestamp received: ";
+            var_dump($params);
         }
     }
     
     $c = new StratumClient('california.stratum.bitcoin.cz', 8000);
+    #$c->set_push_url('http://marek.palatinus.cz/stratum-push/');
+
     #$c = new StratumClient('localhost', 8000);
    
+    if(file_exists('session.dat')) $c->unserialize(file_get_contents('session.dat'));
+
     # Expose service for receiving broadcasts about new blocks 
     $c->register_service('example.pubsub', new TimestampReceivingService());
 
@@ -43,8 +48,10 @@
     }
 
     # Test of receiving notifications in HTTP Polling mode
-    for($x=0;$x<10;$x++) {
+    for($x=0;$x<3;$x++) {
         echo "Polling...\n";
         $c->communicate();
         sleep(3);
     }
+
+   file_put_contents('session.dat', $c->serialize());
