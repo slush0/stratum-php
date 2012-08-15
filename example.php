@@ -15,11 +15,11 @@
         }
     }
     
-    #$c = new StratumClient('california.stratum.bitcoin.cz', 8000);
-    $c = new StratumClient('localhost', 8000);
+    $c = new StratumClient('california.stratum.bitcoin.cz', 8000);
+    #$c = new StratumClient('localhost', 8000);
    
     # Expose service for receiving broadcasts about new blocks 
-    $c->register_service('example.pubsub		', new TimestampReceivingService());
+    $c->register_service('example.pubsub', new TimestampReceivingService());
 
     # Subscribe for receiving unix timestamps from stratum server
     $c->add_request('example.pubsub.subscribe', array(2));
@@ -46,5 +46,5 @@
     for($x=0;$x<10;$x++) {
         echo "Polling...\n";
         $c->communicate();
-        sleep(10);
+        sleep(3);
     }
