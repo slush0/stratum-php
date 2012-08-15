@@ -76,6 +76,8 @@ class StratumClient {
     protected $_buffer;
     protected $_lookup_table;
 
+    protected $_services;
+
     public function __construct($host, $port, $timeout=20) {
         $this->_host = $host;
         $this->_port = $port;
@@ -89,6 +91,8 @@ class StratumClient {
         $this->_request_id = 0;
         $this->_buffer = array();
         $this->_lookup_table = array();
+
+        $this->_services = array();
     }
 
     public function __destruct() {
@@ -102,29 +106,64 @@ class StratumClient {
         }
     }
 
+    public function serialize()
+    {
+        return serialize(array($this->_session_id, $this->_session_timeout_at, $this->_cookie, $this->_request_id, $this->_lookup_table));
+    }
+
+    public function unserialize($data)
+    {
+        list($this->_session_id, $this->_session_timeout_at, $this->_cookie, $this->_request_id, $this->_lookup_table) = unserialize($data);
+    }
+
+    protected function _parse_method($method)
+    {
+        $service_type = implode('.', explode('.', $method, -1));
+        $method = str_replace("$service_type.", '', $method);
+        return array($service_type, $method);
+    }
+
     public function register_service($service_type, $instance)
     {
+        $this->_services[$service_type] = $instance;
+    }
 
+    public function _process_local_service($method, $params)
+    {
+        list($service_type, $m) = $this->_parse_method($method);
+
+        if(!isset($this->_services[$service_type])
+            throw new Exception("Local service '$service_type' not found.");
+
+        return call_user_func(array($this->_service[$service_type], "rpc_$m"), $params);
     }
 
     public function add_request($method, $args) {
         $this->_request_id++;
-        $this->_buffer[] = $this->_buildRequest($method, $args, $this->_request_id);
+        $this->_buffer[] = $this->_build_request($this->_request_id, $method, $args);
 
         $result = new ResultObject($this->_request_id);
         $this->_lookup_table[$this->_request_id] = $result;
         return $result;
     }
 
+    public function process_push()
+    {
+
+        # TODO:
+
+        #$this->_process_response($data);
+    }
+
     public function communicate()
     {
         $payload = implode('', $this->_buffer);
-        $response = $this->_sendRequest($payload, $this->_cookie);
+        $response = $this->_send_request($payload, $this->_cookie);
         $this->_buffer = array();
 
         # This strip HTTP header from the response and return
         # it as an array.
-        $headers = $this->_parseHeader($response);
+        $headers = $this->_parse_header($response);
 
         # Check MD5 
         if (md5($response) != $headers['content-md5']) {
@@ -138,16 +177,16 @@ class StratumClient {
         if (isset($headers['set-cookie']))
         {
             $this->_cookie = $headers['set-cookie'];
-            $cookies = $this->_parseCookie($this->_cookie);
+            $cookies = $this->_parse_cookie($this->_cookie);
             if ($cookies['STRATUM_SESSION']) {
                 $this->_session_id = $cookies['STRATUM_SESSION'];
             }
         }
 
-        $this->_processResponse($response);
+        $this->_process_response($response);
     }
 
-    protected function _buildRequest($method, $args, $request_id) {
+    protected function _build_request($request_id, $method, $args) {
         $request = array(
             'id' => $request_id,
             'method' => $method,
@@ -156,7 +195,26 @@ class StratumClient {
         return json_encode($request)."\n";
     }
 
-    protected function _sendRequest($payload, $cookie=null) {
+    protected function _build_response($request_id, $result, $err_code, $err_msg)
+    {
+        if($err_code !== null || $err_msg !== null)
+        {
+            $response = array(
+                'id' => $request_id,
+                'result' => null,
+                'error' => array((int)$err_code, (string)$err_msg);
+            }
+        } else {
+            $response = array(
+                'id' => $request_id,
+                'result' => $result,
+                'error' => null,
+            );
+        }
+        return json_encode($response)."\n";
+    }
+
+    protected function _send_request($payload, $cookie=null) {
         if (!$this->_sock) {
             $this->_sock = curl_init();
         }
@@ -196,7 +254,7 @@ class StratumClient {
         return $response;
     }
 
-    protected function _processResponse($payload) {
+    protected function _process_response($payload) {
         # Read line by line
         $lines = explode("\n", trim($payload));
         foreach($lines as $line)
@@ -205,12 +263,22 @@ class StratumClient {
             if($obj === null)
             {
                 # Cannot decode line
-                continue;
+                throw new Exception("Cannot decode line '$line'.");
+                #continue;
             }
 
             if(isset($obj['method']))
             {
                 # It's the request or notification
+
+                # TODO: Add exception handling
+                $resp = $this->_call_local_service($obj['method'], $obj['params']);
+
+                if($obj['id'] !== null)
+                {
+                    # It's the RPC request, let's include response into the buffer
+                    $this->_buffer[] = $this->_build_response($obj['id'], $resp, 0, null);    
+                }
 
             } else {
                 # It's the response
@@ -235,7 +303,7 @@ class StratumClient {
         }
     }
 
-    protected function _parseCookie($cookie)
+    protected function _parse_cookie($cookie)
     {
         $out = array();
         $cook = explode(";", $cookie);
@@ -246,7 +314,7 @@ class StratumClient {
         return $out;
     }
 
-    protected function _parseHeader(&$response)
+    protected function _parse_header(&$response)
     {
         /* This is modified method taken from some PHP forum.
            It's strange that standard PHP library is missing such functionality. */
