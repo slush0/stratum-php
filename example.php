@@ -3,9 +3,6 @@
     # Contains basic functionality for using Stratum protocol
     require_once('StratumClient.inc.php');
 
-    # Extended functionality for exposing RPC services on this client
-    require_once('StratumService.inc.php');
-
     class TimestampReceivingService extends StratumService
     {
         # This catch the notification of the 'example.pubsub.time_event'

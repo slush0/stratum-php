@@ -61,6 +61,8 @@ class ResultObject
     }
 }
 
+class StratumService {}
+
 class StratumClient {
 
     protected $_host;
