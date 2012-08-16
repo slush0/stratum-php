@@ -166,10 +166,10 @@ class StratumClient {
 
     public function process_push()
     {
-
-        # TODO:
-
-        #$this->_process_response($data);
+        header('Content-Type', 'application/stratum');
+        echo $_COOKIE['x-session-id'];
+        $payload = file_get_contents("php://input");
+        $this->_process_response($payload);
     }
 
     public function communicate()
